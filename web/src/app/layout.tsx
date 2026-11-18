@@ -10,8 +10,8 @@ const interTight = Inter_Tight({ subsets: ["latin"], weight: ["500", "600", "700
 const jetbrains = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-jetbrains", display: "swap" });
 
 export const metadata: Metadata = {
-  title: { default: "Aevum Starter Kit", template: "%s · Aevum Starter Kit" },
-  description: "Build and test stablecoin payments on QDay Aevum testnet.",
+  title: { default: "Aevum Invoices", template: "%s · Aevum Invoices" },
+  description: "Create and pay stablecoin invoices on QDay Aevum testnet — gasless or standard, in tUSD8.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

@@ -78,9 +78,9 @@ deploy-invoice-aevum: ## Deploy Invoice to Aevum testnet. Needs ACCOUNT=<keystor
 	@test -n "$(ACCOUNT)" || (echo "Set ACCOUNT=<name>. Create one with: cast wallet import <name> --interactive" && exit 1)
 	cd contracts && forge script script/DeployInvoice.s.sol --rpc-url $(AEVUM_RPC) --broadcast --legacy --account $(ACCOUNT)
 
-mint: ## `make anvil` only: mint AMOUNT MockUSD8 to TO. Needs CHECKOUT=<address>
-	@test -n "$(TO)" -a -n "$(CHECKOUT)" || (echo "Usage: make mint TO=0x... CHECKOUT=0x... [AMOUNT=100]" && exit 1)
-	cast send $$(cast call $(CHECKOUT) "token()(address)" --rpc-url $(LOCAL_RPC)) "mint(address,uint256)" $(TO) $$(cast parse-units $(AMOUNT) 6) \
+mint: ## `make anvil` only: mint AMOUNT MockUSD8 to TO. Needs CONTRACT=<address> (Invoice or Checkout)
+	@test -n "$(TO)" -a -n "$(CONTRACT)" || (echo "Usage: make mint TO=0x... CONTRACT=0x... [AMOUNT=100]" && exit 1)
+	cast send $$(cast call $(CONTRACT) "token()(address)" --rpc-url $(LOCAL_RPC)) "mint(address,uint256)" $(TO) $$(cast parse-units $(AMOUNT) 6) \
 	  --rpc-url $(LOCAL_RPC) --unlocked --from $(ANVIL_0) > /dev/null
 	@echo "Minted $(AMOUNT) to $(TO)."
 

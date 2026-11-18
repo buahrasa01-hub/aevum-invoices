@@ -1,7 +1,7 @@
 import type { Address, Hex } from "viem";
 import { tusd8Domain } from "./contracts";
 
-/** EIP-712 types for the message a buyer signs to pay `Checkout.payWithAuthorization`. */
+/** EIP-712 types for the message a buyer signs to pay `Invoice.payWithAuthorization`. */
 export const receiveWithAuthorizationTypes = {
   ReceiveWithAuthorization: [
     { name: "from", type: "address" },
@@ -15,12 +15,12 @@ export const receiveWithAuthorizationTypes = {
 
 export interface CheckoutAuthorization {
   from: Address;
-  /** Must be the Checkout contract. */
+  /** Must be the Invoice contract. */
   to: Address;
   value: bigint;
   validAfter: bigint;
   validBefore: bigint;
-  /** Must be `Checkout.authorizationNonce(orderId)`. */
+  /** Must be `Invoice.authorizationNonce(invoiceId)`. */
   nonce: Hex;
 }
 
@@ -37,6 +37,9 @@ export function checkoutTypedData(chainId: number, token: Address, message: Chec
     message,
   };
 }
+
+/** Same typed data, named for the Invoice app. */
+export const invoiceTypedData = checkoutTypedData;
 
 /** A signature window that is valid at once (validAfter = 0, so clock drift can't reject it) and lasts `seconds`. */
 export function authorizationWindow(seconds = 600, nowMs = Date.now()) {

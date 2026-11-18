@@ -7,24 +7,23 @@ import {
   isAddress,
   isHex,
   parseSignature,
-  parseUnits,
   type Hex,
 } from "viem";
 import { nonceManager, privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
-import { aevumFork, checkoutAbi, isAnvilAccount, localAnvil, TUSD8_DECIMALS } from "@aevum-kit/aevum";
+import { aevumFork, invoiceAbi, isAnvilAccount, localAnvil } from "@aevum-kit/aevum";
 import { defaultNetwork, networkByChainId, type Network } from "@/lib/env";
 import { explain } from "@/lib/errors";
-import { priceOf } from "@/lib/order";
 
 /**
- * The relayer behind "Gasless" checkout. The buyer only signs; this route submits
- * Checkout.payWithAuthorization and pays the gas from RELAYER_PRIVATE_KEY.
+ * The relayer behind "Gasless" invoice payment. The buyer only signs; this route submits
+ * Invoice.payWithAuthorization and pays the gas from RELAYER_PRIVATE_KEY.
  *
  * Anyone on the internet can call this route, and every transaction it sends costs YOUR gas.
  * The rails, in the order they run:
- *  1. Only YOUR Checkout, only payWithAuthorization. It never forwards arbitrary calls.
- *  2. Only the price your app set for that order (priceOf). Dust payments to burn gas are refused.
- *  3. Not already paid, and not already being submitted.
+ *  1. Only YOUR Invoice, only payWithAuthorization. It never forwards arbitrary calls.
+ *  2. Only the amount the invoice itself sets on chain (Invoice.invoiceOf). The amount in the
+ *     request is NEVER trusted — a client asking for a different amount is refused.
+ *  3. Not already paid, cancelled, or expired, and not already being submitted.
  *  4. Simulated first, so a bad or expired signature costs nothing.
  *  5. Rate limits per IP and per payer, and a daily cap on transactions.
  *
@@ -119,7 +118,7 @@ function networkFor(chainId: unknown): Network | undefined {
 export async function GET(req: Request) {
   const net = networkFor(new URL(req.url).searchParams.get("chainId"));
   const account = net ? usable(relayer(), net) : undefined;
-  return NextResponse.json({ enabled: Boolean(account && net?.checkout), relayer: account?.address ?? null });
+  return NextResponse.json({ enabled: Boolean(account && net?.invoice), relayer: account?.address ?? null });
 }
 
 export async function POST(req: Request) {
@@ -132,16 +131,16 @@ export async function POST(req: Request) {
     return fail("Invalid JSON.");
   }
 
-  // Only networks the app is configured for, and only their Checkout.
+  // Only networks the app is configured for, and only their Invoice.
   const net = networkFor(body.chainId);
   if (!net) return fail("This network isn't enabled in the app.");
   const account = usable(relayer(), net);
-  const checkoutAddress = net.checkout;
-  if (!account || !checkoutAddress) {
+  const invoiceAddress = net.invoice;
+  if (!account || !invoiceAddress) {
     // Which settings are missing is useful while you build, and nobody else's business once deployed.
     return fail(
       isDev
-        ? `Gasless mode is off on ${net.label}. Set RELAYER_PRIVATE_KEY (not an anvil key, except on local chains) and NEXT_PUBLIC_CHECKOUT_${net.key.toUpperCase()} in web/.env.local.`
+        ? `Gasless mode is off on ${net.label}. Set RELAYER_PRIVATE_KEY (not an anvil key, except on local chains) and NEXT_PUBLIC_INVOICE_${net.key.toUpperCase()} in web/.env.local.`
         : "Gasless mode isn't available right now. Use Standard mode.",
       503,
     );
@@ -156,7 +155,23 @@ export async function POST(req: Request) {
   ) {
     return fail("Malformed payment request.");
   }
-  if (BigInt(amount) !== parseUnits(priceOf(orderId), TUSD8_DECIMALS)) return fail("The amount doesn't match this order's price.");
+
+  const transport = http();
+  const client = createPublicClient({ chain: net.chain, transport });
+  const wallet = createWalletClient({ account, chain: net.chain, transport });
+
+  // The amount comes from the chain, never from the request. A client asking for a different
+  // amount is refused — the invoice itself is the only price.
+  const inv = await client.readContract({ address: invoiceAddress, abi: invoiceAbi, functionName: "invoiceOf", args: [orderId as Hex] });
+  if (inv.amount === 0n) return fail("No invoice with this id exists.");
+  if (BigInt(amount) !== inv.amount) return fail("The amount doesn't match this invoice.");
+  if (inv.paid) return fail("This invoice is already paid.");
+  if (inv.cancelled) return fail("This invoice was cancelled.");
+  if (inv.dueAt !== 0n && inv.dueAt < BigInt(Math.floor(Date.now() / 1000))) return fail("This invoice is past its due date.");
+  if (inv.payer !== "0x0000000000000000000000000000000000000000" && inv.payer.toLowerCase() !== (from as string).toLowerCase()) {
+    return fail("This invoice is for a different payer.");
+  }
+
   const now = BigInt(Math.floor(Date.now() / 1000));
   if (BigInt(validBefore) > now + MAX_WINDOW_SECONDS) return fail("Signature window is too long (max 1 hour).");
   if (limited(`payer:${from.toLowerCase()}`, PER_PAYER_PER_MINUTE)) return fail("Too many payments from this address. Wait a minute.", 429);
@@ -169,16 +184,12 @@ export async function POST(req: Request) {
   }
   const vNum = v !== undefined ? Number(v) : 27 + (yParity ?? 0);
 
-  const transport = http();
-  const client = createPublicClient({ chain: net.chain, transport });
-  const wallet = createWalletClient({ account, chain: net.chain, transport });
-
-  const flightKey = `${net.chain.id}:${orderId.toLowerCase()}`;
-  if (!claimInFlight(flightKey)) return fail("This order is already being submitted.", 409);
+  const flightKey = `${net.chain.id}:${(orderId as string).toLowerCase()}`;
+  if (!claimInFlight(flightKey)) return fail("This invoice is already being submitted.", 409);
   try {
-    if (await client.readContract({ address: checkoutAddress, abi: checkoutAbi, functionName: "isPaid", args: [orderId] })) {
+    if (await client.readContract({ address: invoiceAddress, abi: invoiceAbi, functionName: "isPaid", args: [orderId as Hex] })) {
       inFlight.delete(flightKey);
-      return fail("This order is already paid. Start a new order.", 409);
+      return fail("This invoice is already paid. Start a new invoice.", 409);
     }
     if (overDailyLimit()) {
       inFlight.delete(flightKey);
@@ -187,10 +198,10 @@ export async function POST(req: Request) {
 
     const call = {
       account,
-      address: checkoutAddress,
-      abi: checkoutAbi,
+      address: invoiceAddress,
+      abi: invoiceAbi,
       functionName: "payWithAuthorization",
-      args: [orderId, from, BigInt(amount), BigInt(validAfter), BigInt(validBefore), vNum, r, s],
+      args: [orderId as Hex, from as Hex, BigInt(validAfter), BigInt(validBefore), vNum, r, s],
     } as const;
     await client.simulateContract(call);
     const hash = await wallet.writeContract({ ...call, type: "legacy" });

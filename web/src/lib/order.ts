@@ -1,34 +1,31 @@
-import { keccak256, toHex, type Hex } from "viem";
+import { formatUnits, keccak256, toHex, type Hex } from "viem";
 
 /**
- * The demo order. Rename it into an invoice, a ticket, a pledge… The contract only sees
- * `orderId` and `amount`; everything else lives in your app.
+ * Invoice helpers. The amount always comes from the chain (`Invoice.invoiceOf`);
+ * nothing here ever decides what an invoice costs.
  */
-export const demoOrder = {
-  lines: [
-    { label: "Sample item", amount: "1.00" },
-    { label: "Service fee", amount: "0.05" },
-  ],
-  total: "1.05",
-};
 
-/**
- * What an order costs, decided by the app, never by the buyer's request. The relayer only
- * submits payments for exactly this amount, so nobody can make it pay gas for dust payments.
- * In your app, look the order up in your database instead.
- */
-export function priceOf(_orderId: Hex): string {
-  return demoOrder.total;
-}
-
-export function newOrderId(): Hex {
+export function newInvoiceId(): Hex {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   return keccak256(toHex(bytes));
 }
 
-/** Short, human-friendly label for a bytes32 order id. */
-export function orderLabel(orderId: Hex): string {
-  return `#${orderId.slice(2, 6).toUpperCase()}-${orderId.slice(-4).toUpperCase()}`;
+/** Short, human-friendly label for a bytes32 invoice id. */
+export function invoiceLabel(invoiceId: Hex): string {
+  return `#${invoiceId.slice(2, 6).toUpperCase()}-${invoiceId.slice(-4).toUpperCase()}`;
+}
+
+/** Backwards-compatible alias (the old checkout pages called it orderLabel). */
+export const orderLabel = invoiceLabel;
+
+export function formatTusd8(amount: bigint, decimals: number): string {
+  return formatUnits(amount, decimals);
+}
+
+/** Human-readable due date: "No expiry" for 0, otherwise a local date + time. */
+export function dueLabel(dueAt: bigint): string {
+  if (dueAt === 0n) return "No expiry";
+  return new Date(Number(dueAt) * 1000).toLocaleString();
 }
 
 export function short(value: string, head = 6, tail = 4): string {

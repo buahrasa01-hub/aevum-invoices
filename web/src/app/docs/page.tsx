@@ -14,7 +14,7 @@ const sections = [
   { id: "network", label: "Network details" },
   { id: "tokens", label: "Get test tokens" },
   { id: "deploy", label: "Deploy to Aevum" },
-  { id: "checkout", label: "How the checkout works" },
+  { id: "invoices", label: "How invoices work" },
   { id: "differences", label: "Differences from Ethereum" },
   { id: "commands", label: "Commands" },
   { id: "submitting", label: "Submitting your project" },
@@ -92,11 +92,11 @@ export default function DocsPage() {
                   <tr><th>Track</th><th>Where this kit helps</th></tr>
                 </thead>
                 <tbody>
-                  <tr><td><strong>Invoice Payments</strong></td><td>An order id is an invoice id. <code>Checkout.paymentOf(orderId)</code> tells you if it&apos;s paid; the <code>Paid</code> event is the receipt.</td></tr>
+                  <tr><td><strong>Invoice Payments</strong></td><td>The merchant creates an invoice with a fixed amount, due date and payer. <code>Invoice.invoiceOf(invoiceId)</code> is the source of truth; the <code>InvoicePaid</code> event is the receipt.</td></tr>
                   <tr><td><strong>Payroll and Vesting</strong></td><td>Reuse the tUSD8 setup, the chunked event reader and the relayer. Streaming and schedules are yours to build.</td></tr>
                   <tr><td><strong>Crowdfunding</strong></td><td>Pledges are payments to a campaign contract. Start from <code>Checkout.sol</code> and add goals, deadlines and refunds.</td></tr>
                   <tr><td><strong>Confirmation of Payee</strong></td><td>Check who you&apos;re paying before you sign. Aevum testnet has an ERC-8004-style identity registry, <code className="wrap">0xF45E7f39Caba1d2055f613970575a7e7069636Be</code> (found on chain, not in QDay&apos;s docs yet).</td></tr>
-                  <tr><td><strong>Decentralized Payments</strong></td><td>Gasless checkout (EIP-3009 + relayer) works today. Account abstraction is on its way to this kit.</td></tr>
+                  <tr><td><strong>Decentralized Payments</strong></td><td>Gasless invoice payment (EIP-3009 + relayer) works today. Account abstraction is on its way to this kit.</td></tr>
                   <tr><td><strong>Digital Ownership</strong></td><td>Pay in tUSD8, then mint or transfer the asset in the same contract call.</td></tr>
                   <tr><td><strong>Native AI Assistants</strong></td><td><code>examples/pay-gasless</code> shows a script that signs and pays without a browser, the starting point for an agent.</td></tr>
                   <tr><td><strong>Other business payment tools</strong></td><td>Anything that moves tUSD8 on Aevum for a real business need.</td></tr>
@@ -116,7 +116,7 @@ export default function DocsPage() {
             </p>
             <Code>{`
 git clone --recursive ${repoUrl}.git
-cd aevum-starter-kit
+cd aevum-invoices
 make install          # Solidity libs + JS packages
 make check            # build, Shanghai opcode check, unit tests, fork tests
 `}</Code>
@@ -125,13 +125,13 @@ make check            # build, Shanghai opcode check, unit tests, fork tests
 # terminal 1: local copy of Aevum testnet on 127.0.0.1:8555 (chain 440050)
 make fork
 
-# terminal 2: deploy Checkout and give yourself test money
-make deploy-fork                      # prints the Checkout address
+# terminal 2: deploy Invoice and give yourself test money
+make deploy-invoice-fork            # prints the Invoice address
 make deal TO=<your wallet address>    # 100 tUSD8 + 10 tQDAY, on the fork only
 
 cp web/.env.example web/.env.local
 #   NEXT_PUBLIC_NETWORKS=fork,aevum
-#   NEXT_PUBLIC_CHECKOUT_FORK=<address from deploy-fork>
+#   NEXT_PUBLIC_INVOICE_FORK=<address from deploy-invoice-fork>
 #   RELAYER_PRIVATE_KEY=<an anvil test key>   (optional: enables gasless mode)
 make dev
 `}</Code>
@@ -191,7 +191,7 @@ make dev
                 <strong>Local fork:</strong> <code>make deal TO=&lt;address&gt;</code> for unlimited test balances. Nothing leaves your machine.
               </li>
             </ul>
-            <p>1 tQDAY is plenty: deploying <code>Checkout</code> costs well under 0.01 tQDAY.</p>
+            <p>1 tQDAY is plenty: deploying <code>Invoice</code> costs well under 0.01 tQDAY.</p>
             <h3>Discord faucet</h3>
             <ol>
               <li>
@@ -227,13 +227,13 @@ make deploy-aevum ACCOUNT=aevum-deployer          # MERCHANT defaults to the dep
 MERCHANT=0x... make deploy-aevum ACCOUNT=aevum-deployer
 `}</Code>
             <p>
-              Then set <code>NEXT_PUBLIC_CHECKOUT_AEVUM</code> in <code>web/.env.local</code> and add <code>aevum</code> to{" "}
+              Then set <code>NEXT_PUBLIC_INVOICE_AEVUM</code> in <code>web/.env.local</code> and add <code>aevum</code> to{" "}
               <code>NEXT_PUBLIC_NETWORKS</code>.
             </p>
             <p>
               <strong>Putting the app online:</strong> set <code>NEXT_PUBLIC_NETWORKS=aevum</code> only. With <code>fork</code> or{" "}
               <code>local</code> listed, visitors get a &quot;Local fork&quot; option that points at their own 127.0.0.1. Give the relayer its own
-              wallet with a little tQDAY, and read the relayer notes in <a href="#checkout">How the checkout works</a>.
+              wallet with a little tQDAY, and read the relayer notes in <a href="#invoices">How invoices work</a>.
             </p>
             <div className="notice bad">
               <strong>Use a wallet made only for testing.</strong>
@@ -245,20 +245,23 @@ MERCHANT=0x... make deploy-aevum ACCOUNT=aevum-deployer
             </p>
           </section>
 
-          <section id="checkout">
-            <h2>How the checkout works</h2>
+          <section id="invoices">
+            <h2>How invoices work</h2>
             <p>
-              <code>Checkout</code> takes one token and one merchant address. Each <code>orderId</code> (any <code>bytes32</code>) can be paid
-              once. The money goes straight to the merchant, and the <code>Paid(orderId, payer, amount)</code> event is the receipt.
+              <code>Invoice</code> takes one token and one merchant address. The merchant creates an invoice with{" "}
+              <code>createInvoice(invoiceId, payer, amount, dueAt, memo)</code>: a fixed amount in tUSD8, an optional due date, and an
+              optional payer (empty means anyone may pay). The buyer then pays the exact amount —{" "}
+              <code>pay(invoiceId)</code> after approving it, or gasless with <code>payWithAuthorization(invoiceId, …)</code>. The money goes
+              straight to the merchant, and the <code>InvoicePaid(invoiceId, payer, amount)</code> event is the receipt.
             </p>
             <div className="grid-2">
               <div className="card">
                 <h3>Standard</h3>
                 <p className="sub">Two transactions. The buyer pays gas.</p>
                 <Code>{`
-buyer → approve(Checkout, amount) → tUSD8
-buyer → pay(orderId, amount)      → Checkout
-        Checkout → transferFrom   → merchant
+buyer → approve(Invoice, amount) → tUSD8
+buyer → pay(invoiceId)           → Invoice
+        Invoice → transferFrom   → merchant
 `}</Code>
               </div>
               <div className="card">
@@ -266,34 +269,39 @@ buyer → pay(orderId, amount)      → Checkout
                 <p className="sub">One signature. The buyer needs no tQDAY.</p>
                 <Code>{`
 buyer   signs ReceiveWithAuthorization (off-chain)
-relayer → payWithAuthorization(...) → Checkout
-          Checkout → receiveWithAuthorization
-          tUSD8 → Checkout → merchant
+relayer → payWithAuthorization(...) → Invoice
+          Invoice → receiveWithAuthorization
+          tUSD8 → Invoice → merchant
 `}</Code>
               </div>
             </div>
             <p>Design choices worth keeping:</p>
             <ul>
               <li>
-                The signed <code>nonce</code> must equal <code>Checkout.authorizationNonce(orderId)</code>. That binds the signature to one order, so
-                a relayer can&apos;t reuse it to mark a different order as paid.
+                The signed <code>nonce</code> must equal <code>Invoice.authorizationNonce(invoiceId)</code>. That binds the signature to one
+                invoice, so a relayer can&apos;t reuse it to mark a different invoice as paid.
               </li>
               <li>
-                <code>receiveWithAuthorization</code> (not <code>transferWithAuthorization</code>) means only the Checkout can pull the funds, so
+                <code>receiveWithAuthorization</code> (not <code>transferWithAuthorization</code>) means only the Invoice can pull the funds, so
                 nobody can front-run the signature into a plain transfer.
               </li>
               <li>
-                The contract doesn&apos;t know prices. Your app decides what an order costs (<code>priceOf</code> in{" "}
-                <code>web/src/lib/order.ts</code>) and checks <code>paymentOf(orderId)</code> <strong>and its amount</strong> before delivering.
+                <strong>The amount lives on chain, in the invoice.</strong> There is no price table in the app and nothing for a payer to
+                over- or underpay — unlike the kit&apos;s <code>Checkout</code>, where any amount could mark an order as paid. The relayer
+                reads <code>invoiceOf(invoiceId)</code> and refuses any amount that doesn&apos;t match.
+              </li>
+              <li>
+                Invoices expire at their due date and the merchant can cancel unpaid ones. Tokens sent to the contract by mistake are
+                recoverable with <code>recoverERC20</code> — nothing stays stuck.
               </li>
             </ul>
             <p>
               The relayer (<code>web/src/app/api/relay/route.ts</code>) pays gas for anyone who calls it, so it has rails. Keep them:
             </p>
             <ul>
-              <li>Only <code>payWithAuthorization</code> on your Checkout, nothing else.</li>
-              <li>Only the price your app set for that order. Otherwise anyone could burn your gas with 0.000001 tUSD8 payments.</li>
-              <li>Skips orders already paid or already being submitted, and simulates before sending.</li>
+              <li>Only <code>payWithAuthorization</code> on your Invoice, nothing else.</li>
+              <li>Only the amount the invoice itself sets on chain. Otherwise anyone could burn your gas with 0.000001 tUSD8 payments.</li>
+              <li>Skips invoices already paid, cancelled, expired, or already being submitted, and simulates before sending.</li>
               <li>Refuses anvil&apos;s public keys on a real network, caps the signature window at 1 hour, rate-limits per IP and per payer, and stops at a daily cap.</li>
               <li>
                 <strong>The limits live in memory.</strong> Fine for <code>next start</code> on one server; on serverless hosts move them to a shared
@@ -301,17 +309,16 @@ relayer → payWithAuthorization(...) → Checkout
               </li>
             </ul>
             <div className="notice warn">
-              <strong>Anyone can pay any order, with any amount.</strong>
+              <strong>Anyone can pay an open invoice — by design.</strong>
               <span>
-                <code>pay(orderId, 1)</code> marks an order as paid for 0.000001 tUSD8 and can front-run the real buyer. Never ship on{" "}
-                <code>isPaid</code> alone: compare the amount. For production, key payments by <code>keccak256(payer, orderId)</code> or have the
-                merchant sign each quote, and use unguessable order ids.
+                An invoice with no designated payer is payable by any address, so share its pay link only with the intended payer, or set the
+                payer when you create it. Invoice ids are random 32 bytes, so nobody can guess and claim one in advance.
               </span>
             </div>
             <p>Code to read, in order:</p>
             <ol>
-              <li><code>contracts/src/Checkout.sol</code></li>
-              <li><code>contracts/test/Checkout.t.sol</code>: every rule above as a test</li>
+              <li><code>contracts/src/Invoice.sol</code></li>
+              <li><code>contracts/test/Invoice.t.sol</code>: every rule above as a test</li>
               <li><code>contracts/test/fork/AevumFork.t.sol</code>: the same flows against the real tUSD8</li>
               <li><code>examples/src/pay-gasless.ts</code>: sign and relay in about 40 lines</li>
               <li><code>web/src/app/checkout/page.tsx</code>: both modes in the UI</li>
@@ -374,7 +381,10 @@ make fork           Local copy of Aevum testnet on 127.0.0.1:8555 (chain 440050)
 make deploy-local   Deploy MockUSD8 + Checkout to \`make anvil\`
 make deploy-fork    Deploy Checkout (real tUSD8) to \`make fork\`
 make deploy-aevum   Deploy Checkout to Aevum testnet (ACCOUNT=<keystore>)
-make mint           \`make anvil\` only: mint MockUSD8 (TO=, CHECKOUT=, AMOUNT=)
+make deploy-invoice-local   Deploy MockUSD8 + Invoice to \`make anvil\`
+make deploy-invoice-fork    Deploy Invoice (real tUSD8) to \`make fork\`
+make deploy-invoice-aevum   Deploy Invoice to Aevum testnet (ACCOUNT=<keystore>)
+make mint           \`make anvil\` only: mint MockUSD8 (TO=, CONTRACT=, AMOUNT=)
 make deal           \`make fork\` only: give TO tUSD8 and tQDAY
 make dev            Start the web app
 `}</Code>
@@ -384,7 +394,7 @@ make dev            Start the web app
             <Code>{`
 pnpm example check-setup      # chain, block, gas price and balances of ADDRESS
 pnpm example pay-gasless      # BUYER_KEY signs, RELAYER_KEY submits
-pnpm example read-payments    # every Paid event, 1,000 blocks at a time
+pnpm example read-payments    # every InvoicePaid event, 1,000 blocks at a time
 `}</Code>
           </section>
 
@@ -460,8 +470,8 @@ pnpm example read-payments    # every Paid event, 1,000 blocks at a time
           <section id="faq">
             <h2>FAQ</h2>
             <dl className="faq">
-              <dt>Do I have to use Checkout?</dt>
-              <dd>No. It&apos;s an example. Keep the parts you need (<code>packages/aevum</code>, the chunked log reader, the setup checker) and replace the rest.</dd>
+              <dt>Do I have to use Invoice?</dt>
+              <dd>No. It&apos;s this app&apos;s contract, forked from the kit&apos;s <code>Checkout</code>. Keep the parts you need (<code>packages/aevum</code>, the chunked log reader, the setup checker) and replace the rest.</dd>
               <dt>Can I use account abstraction?</dt>
               <dd>Aevum has an ERC-4337 bundler (EntryPoint v0.7) and Kernel v3.1 accounts. A smart-account example is coming to this kit.</dd>
               <dt>Can I use Hardhat?</dt>

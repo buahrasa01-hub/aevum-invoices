@@ -15,3 +15,6 @@ contracts/cache/
 contracts/broadcast/
 
 .DS_Store
+
+# foundry cache when run from the repo root
+/cache/

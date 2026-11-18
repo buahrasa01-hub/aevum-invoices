@@ -1,14 +1,14 @@
 "use client";
 
-import { checkoutAbi, getLogsChunked, txUrl } from "@aevum-kit/aevum";
+import { getLogsChunked, invoiceAbi, txUrl } from "@aevum-kit/aevum";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
-import { formatUnits, getAbiItem, type PublicClient } from "viem";
+import { formatUnits, getAbiItem, type Address, type Hash, type Hex, type PublicClient } from "viem";
 import { useAccount, usePublicClient } from "wagmi";
 import { useToken } from "@/components/useToken";
 import { useNetwork } from "@/lib/network";
-import { orderLabel, short } from "@/lib/order";
+import { invoiceLabel, short } from "@/lib/order";
 
 const WINDOWS = [
   { blocks: 1_000n, label: "Last 1k blocks" },
@@ -16,10 +16,21 @@ const WINDOWS = [
   { blocks: 20_000n, label: "Last 20k blocks" },
 ];
 
+type Row = {
+  key: string;
+  kind: "created" | "paid" | "cancelled";
+  invoiceId: Hex;
+  payer?: Address;
+  amount?: bigint;
+  blockNumber: bigint;
+  logIndex: number;
+  txHash?: Hash;
+};
+
 export default function ActivityPage() {
   const { net } = useNetwork();
   const appChain = net.chain;
-  const checkoutAddress = net.checkout;
+  const invoiceAddress = net.invoice;
   const deployBlock = net.deployBlock;
   const hasExplorer = net.hasExplorer;
   const client = usePublicClient({ chainId: appChain.id }) as PublicClient | undefined;
@@ -30,51 +41,83 @@ export default function ActivityPage() {
   const [progress, setProgress] = useState(0);
 
   const logs = useQuery({
-    queryKey: ["paid-logs", appChain.id, checkoutAddress, windowSize.toString(), onlyMine ? address : null],
-    enabled: Boolean(client && checkoutAddress),
+    queryKey: ["invoice-logs", appChain.id, invoiceAddress, windowSize.toString(), onlyMine ? address : null],
+    enabled: Boolean(client && invoiceAddress),
     queryFn: async () => {
       const head = await client!.getBlockNumber();
       let from = head > windowSize ? head - windowSize + 1n : 0n;
       if (deployBlock !== undefined && deployBlock > from) from = deployBlock;
       setProgress(0);
-      const result = await getLogsChunked(client!, {
-        address: checkoutAddress!,
-        event: getAbiItem({ abi: checkoutAbi, name: "Paid" }),
-        args: onlyMine && address ? { payer: address } : undefined,
-        fromBlock: from,
-        toBlock: head,
-        onProgress: (done, total) => setProgress(total ? Number((done * 100n) / total) : 100),
-      });
-      return { from, head, items: [...result].reverse() };
+      const mine = onlyMine && address ? { payer: address } : undefined;
+      const rows: Row[] = [];
+      type Kind = "InvoiceCreated" | "InvoicePaid" | "InvoiceCancelled";
+      async function fetchKind(name: Kind, args: { payer: Address } | undefined, index: number, total: number) {
+        const event = getAbiItem({ abi: invoiceAbi, name });
+        // The event is one of three, so viem types the logs as `never`; the shape below is what all three carry.
+        const result = (await getLogsChunked(client!, {
+          address: invoiceAddress!,
+          event,
+          args: args as Record<string, unknown> | undefined,
+          fromBlock: from,
+          toBlock: head,
+          onProgress: (done, totalBlocks) =>
+            setProgress(Math.round(((index + (totalBlocks ? Number((done * 100n) / totalBlocks) / 100 : 1)) / total) * 100)),
+        })) as unknown as Array<{
+          args: { invoiceId: Hex; payer?: Address; amount?: bigint };
+          blockNumber: bigint;
+          logIndex: number;
+          transactionHash?: Hash;
+        }>;
+        for (const l of result) {
+          rows.push({
+            key: `${l.transactionHash}-${l.logIndex}`,
+            kind: name === "InvoiceCreated" ? "created" : name === "InvoicePaid" ? "paid" : "cancelled",
+            invoiceId: l.args.invoiceId,
+            payer: l.args.payer,
+            amount: l.args.amount,
+            blockNumber: l.blockNumber,
+            logIndex: l.logIndex,
+            txHash: l.transactionHash,
+          });
+        }
+      }
+      await fetchKind("InvoiceCreated", mine, 0, 3);
+      await fetchKind("InvoicePaid", mine, 1, 3);
+      // InvoiceCancelled carries no payer, so "only mine" can't filter it — skip it there.
+      if (mine) setProgress(100);
+      else await fetchKind("InvoiceCancelled", undefined, 2, 3);
+      rows.sort((a, b) => (a.blockNumber === b.blockNumber ? b.logIndex - a.logIndex : Number(b.blockNumber - a.blockNumber)));
+      return { from, head, items: rows };
     },
   });
 
-  const total = logs.data?.items.reduce((sum, l) => sum + (l.args.amount ?? 0n), 0n) ?? 0n;
+  const paidTotal = logs.data?.items.filter((r) => r.kind === "paid").reduce((sum, r) => sum + (r.amount ?? 0n), 0n) ?? 0n;
+  const paidCount = logs.data?.items.filter((r) => r.kind === "paid").length ?? 0;
 
   return (
     <main className="shell">
       <div className="page-head">
         <div>
-          <p className="eyebrow">Example · reading events</p>
-          <h1>Payment activity</h1>
+          <p className="eyebrow">Invoice · reading events</p>
+          <h1>Invoice activity</h1>
           <p className="lede">
-            Every <code>Paid</code> event from your Checkout. Aevum serves at most 1,000 blocks per <code>eth_getLogs</code> call, so the kit
-            reads in chunks.
+            Every <code>InvoiceCreated</code>, <code>InvoicePaid</code> and <code>InvoiceCancelled</code> event from your Invoice. Aevum
+            serves at most 1,000 blocks per <code>eth_getLogs</code> call, so the app reads in chunks.
           </p>
         </div>
         {logs.data && (
           <div className="score">
-            <span className="score-num">{logs.data.items.length}</span>
+            <span className="score-num">{paidCount}</span>
             <span className="fine">
-              payments · {formatUnits(total, token.decimals)} {token.symbol}
+              paid · {formatUnits(paidTotal, token.decimals)} {token.symbol}
             </span>
           </div>
         )}
       </div>
 
-      {!checkoutAddress ? (
+      {!invoiceAddress ? (
         <div className="card empty">
-          No Checkout configured for {net.label}. Set <code>NEXT_PUBLIC_CHECKOUT_{net.key.toUpperCase()}</code> in <code>web/.env.local</code>.
+          No Invoice configured for {net.label}. Set <code>NEXT_PUBLIC_INVOICE_{net.key.toUpperCase()}</code> in <code>web/.env.local</code>.
         </div>
       ) : (
         <section className="card flush">
@@ -92,7 +135,7 @@ export default function ActivityPage() {
             ))}
             <label style={{ display: "inline-flex", gap: 8, alignItems: "center", marginLeft: "auto", fontSize: 14, color: "var(--text-muted)" }}>
               <input type="checkbox" checked={onlyMine} disabled={!address} onChange={(e) => setOnlyMine(e.target.checked)} />
-              Only my payments
+              Only my invoices
             </label>
           </div>
 
@@ -111,7 +154,8 @@ export default function ActivityPage() {
 
           {logs.data && logs.data.items.length === 0 && !logs.isFetching && (
             <p className="empty">
-              No payments in blocks {logs.data.from.toString()}–{logs.data.head.toString()}. <Link href="/checkout">Make one</Link>.
+              No invoice events in blocks {logs.data.from.toString()}–{logs.data.head.toString()}.{" "}
+              <Link href="/invoices/new">Create one</Link>.
             </p>
           )}
 
@@ -120,7 +164,8 @@ export default function ActivityPage() {
               <table className="data">
                 <thead>
                   <tr>
-                    <th>Order</th>
+                    <th>Event</th>
+                    <th>Invoice</th>
                     <th>Payer</th>
                     <th className="right">Amount</th>
                     <th className="right">Block</th>
@@ -128,18 +173,29 @@ export default function ActivityPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {logs.data.items.map((l) => (
-                    <tr key={`${l.transactionHash}-${l.logIndex}`}>
-                      <td className="mono">{l.args.orderId ? orderLabel(l.args.orderId) : "—"}</td>
-                      <td className="mono">{short(l.args.payer ?? "")}</td>
-                      <td className="right num">
-                        {formatUnits(l.args.amount ?? 0n, token.decimals)} {token.symbol}
+                  {logs.data.items.map((r) => (
+                    <tr key={r.key}>
+                      <td>
+                        <span className={`status-pill ${r.kind === "paid" ? "good" : r.kind === "cancelled" ? "warn" : ""}`}>
+                          {r.kind === "created" ? "Created" : r.kind === "paid" ? "Paid" : "Cancelled"}
+                        </span>
                       </td>
-                      <td className="right num">{l.blockNumber?.toString()}</td>
+                      <td className="mono">{invoiceLabel(r.invoiceId)}</td>
+                      <td className="mono">{r.payer ? short(r.payer) : "—"}</td>
+                      <td className="right num">
+                        {r.amount !== undefined ? (
+                          <>
+                            {formatUnits(r.amount, token.decimals)} {token.symbol}
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="right num">{r.blockNumber.toString()}</td>
                       <td style={{ display: "flex", gap: 14 }}>
-                        <Link href={`/receipts/${l.args.orderId}?tx=${l.transactionHash}&chain=${appChain.id}`}>Receipt</Link>
-                        {hasExplorer && l.transactionHash && (
-                          <a href={txUrl(l.transactionHash)} target="_blank" rel="noreferrer">
+                        <Link href={`/receipts/${r.invoiceId}?tx=${r.txHash ?? ""}&chain=${appChain.id}`}>Receipt</Link>
+                        {hasExplorer && r.txHash && (
+                          <a href={txUrl(r.txHash)} target="_blank" rel="noreferrer">
                             Tx
                           </a>
                         )}

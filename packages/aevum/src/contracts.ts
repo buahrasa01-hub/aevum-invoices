@@ -40,3 +40,33 @@ export const checkoutAbi = parseAbi([
   "error ZeroAmount()",
   "error ZeroAddress()",
 ]);
+
+/** ABI of contracts/src/Invoice.sol (Aevum Invoices). */
+export const invoiceAbi = parseAbi([
+  "function token() view returns (address)",
+  "function merchant() view returns (address)",
+  "function createInvoice(bytes32 invoiceId, address payer, uint256 amount, uint64 dueAt, string memo)",
+  "function pay(bytes32 invoiceId)",
+  "function payWithAuthorization(bytes32 invoiceId, address from, uint256 validAfter, uint256 validBefore, uint8 v, bytes32 r, bytes32 s)",
+  "function cancelInvoice(bytes32 invoiceId)",
+  "function recoverERC20(address token_, address to)",
+  "function authorizationNonce(bytes32 invoiceId) view returns (bytes32)",
+  "function invoiceOf(bytes32 invoiceId) view returns ((address payer, address paidBy, uint64 createdAt, uint64 dueAt, uint64 paidAt, uint256 amount, string memo, bool paid, bool cancelled))",
+  "function isPaid(bytes32 invoiceId) view returns (bool)",
+  "function isCancelled(bytes32 invoiceId) view returns (bool)",
+  "function isExpired(bytes32 invoiceId) view returns (bool)",
+  "function isOpen(bytes32 invoiceId) view returns (bool)",
+  "event InvoiceCreated(bytes32 indexed invoiceId, address indexed payer, uint256 amount, uint64 dueAt, string memo)",
+  "event InvoicePaid(bytes32 indexed invoiceId, address indexed payer, uint256 amount)",
+  "event InvoiceCancelled(bytes32 indexed invoiceId)",
+  "error OnlyMerchant()",
+  "error InvoiceExists(bytes32 invoiceId)",
+  "error InvoiceNotFound(bytes32 invoiceId)",
+  "error AlreadyPaid(bytes32 invoiceId)",
+  "error AlreadyCancelled(bytes32 invoiceId)",
+  "error InvoiceExpired(bytes32 invoiceId)",
+  "error WrongPayer(address payer)",
+  "error ZeroAmount()",
+  "error ZeroAddress()",
+  "error InvalidDueDate()",
+]);
