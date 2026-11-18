@@ -17,7 +17,7 @@ AMOUNT      ?= 100
 # `make fork` runs under its own chain ID so wallets and signatures never mix it up with the real testnet.
 FORK_CHAIN  := 440050
 
-.PHONY: help install build test test-fork check anvil fork deploy-local deploy-fork deploy-aevum mint deal dev
+.PHONY: help install build test test-fork check anvil fork deploy-local deploy-fork deploy-aevum deploy-invoice-local deploy-invoice-fork deploy-invoice-aevum mint deal dev
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[36mmake %-14s\033[0m %s\n", $$1, $$2}'
@@ -62,6 +62,21 @@ deploy-fork: ## Deploy Checkout (real tUSD8) to `make fork`
 deploy-aevum: ## Deploy Checkout to Aevum testnet. Needs ACCOUNT=<keystore name> (see README)
 	@test -n "$(ACCOUNT)" || (echo "Set ACCOUNT=<name>. Create one with: cast wallet import <name> --interactive" && exit 1)
 	cd contracts && forge script script/Deploy.s.sol --rpc-url $(AEVUM_RPC) --broadcast --legacy --account $(ACCOUNT)
+
+deploy-invoice-local: ## Deploy Invoice (MockUSD8) to `make anvil`
+	cd contracts && forge script script/DeployInvoice.s.sol --rpc-url $(LOCAL_RPC) --broadcast --unlocked --sender $(ANVIL_0)
+
+deploy-invoice-fork: ## Deploy Invoice (real tUSD8) to `make fork`
+	@test "$$(cast chain-id --rpc-url $(FORK_RPC))" = "$(FORK_CHAIN)" || (echo "This only works on 'make fork'." && exit 1)
+	@DEPLOYER=$$(cast to-check-sum-address 0x$$(openssl rand -hex 20)); \
+	  cast rpc anvil_setBalance $$DEPLOYER 0x8ac7230489e80000 --rpc-url $(FORK_RPC) > /dev/null && \
+	  cast rpc anvil_impersonateAccount $$DEPLOYER --rpc-url $(FORK_RPC) > /dev/null && \
+	  echo "Deploying from throwaway address $$DEPLOYER (no private key exists for it)" && \
+	  cd contracts && MERCHANT=$${MERCHANT:-$(ANVIL_0)} forge script script/DeployInvoice.s.sol --rpc-url $(FORK_RPC) --broadcast --unlocked --sender $$DEPLOYER
+
+deploy-invoice-aevum: ## Deploy Invoice to Aevum testnet. Needs ACCOUNT=<keystore name>
+	@test -n "$(ACCOUNT)" || (echo "Set ACCOUNT=<name>. Create one with: cast wallet import <name> --interactive" && exit 1)
+	cd contracts && forge script script/DeployInvoice.s.sol --rpc-url $(AEVUM_RPC) --broadcast --legacy --account $(ACCOUNT)
 
 mint: ## `make anvil` only: mint AMOUNT MockUSD8 to TO. Needs CHECKOUT=<address>
 	@test -n "$(TO)" -a -n "$(CHECKOUT)" || (echo "Usage: make mint TO=0x... CHECKOUT=0x... [AMOUNT=100]" && exit 1)
