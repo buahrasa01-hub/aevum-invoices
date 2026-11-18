@@ -11,9 +11,23 @@ Based on the [Aevum Starter Kit](https://github.com/qday-io/aevum-starter-kit) (
 
 ## Live deployment
 
-> **Testnet deploy is pending** (target ~5 Dec 2026, before the 11 Dec deadline). This section will list the Invoice address on Aevum testnet, the deploy block, and the live web URL once deployed. Locally, everything below already runs end to end on a fork of Aevum (see Quickstart).
+**Live web app: https://aevum-invoices-buahrasa01.vercel.app/** (Vercel, account `buahrasa01`, public — no login wall; project `aevum-invoices`, deploy `dpl_75WBi5ypCEjKmogaUBSdMHU8XeQg`).
+
+**Invoice on Aevum testnet (chain `44005`): [`0xeA7892a5B3fa083B2F86E39Eb8086Aa6Bd04a995`](https://explorer-test.qday.info/address/0xeA7892a5B3fa083B2F86E39Eb8086Aa6Bd04a995)** — token tUSD8 [`0x456569838f1d43009A91ebA4263147Afd7233483`](https://explorer-test.qday.info/address/0x456569838f1d43009A91ebA4263147Afd7233483), merchant `0xFFFfA2423dAbfE6128D8F01c5BEbc3571F344610`. Deployed 18 Nov 2026, **block `3493736`**, deploy tx [`0x1976e601d7d120c4984497f1857d8f1b0ffb9a15a64a160623055e79fda80f5d`](https://explorer-test.qday.info/tx/0x1976e601d7d120c4984497f1857d8f1b0ffb9a15a64a160623055e79fda80f5d) (status success, 1,090,386 gas). Deployed with `make deploy-invoice-aevum` (Foundry keystore, legacy tx).
+
+**End-to-end proof on the real testnet (18 Nov 2026):**
+
+| Step | Result |
+|---|---|
+| Standard pay, invoice `0xea824866…` | pay tx [`0x05ba593b…`](https://explorer-test.qday.info/tx/0x05ba593b8c0755be7dad247993fb6787c7bc32fcb88c79a2cffee03659006663), `isPaid=true` |
+| Gasless pay via local relay, invoice `0x8c17c277…` | relay HTTP 200, tx [`0x4ecbcedb…`](https://explorer-test.qday.info/tx/0x4ecbcedb0592d1bd0a5bee8385de65d78aebc53e5a39573efd1d18af422c7246), `isPaid=true` |
+| Gasless pay via the **live Vercel relay**, invoice `0x02ac8f26…` | relay HTTP 200, tx [`0xbe349196…`](https://explorer-test.qday.info/tx/0xbe349196c8e4d3634c042a0e8a988eb2a6f671e3658b60d9ce35f636f7ed4a88), `isPaid=true` |
+| Wrong amount to the relay | HTTP 400 `The amount doesn't match this invoice.` |
+| Merchant tUSD8 balance | 2 → 4 → 5 (all 3 test payments received) |
 
 > **Judging counts activity on Aevum.** Contracts, payments and transfers must happen on Aevum testnet. Settling only on another chain (for example x402 on Base) doesn't count.
+
+**Vercel deploy note:** the live site is deployed from this repo via the Vercel REST API (file upload, no git link — the Vercel CLI rejects Vault surrogate tokens). Two deployment-only transforms are applied to the uploaded tree, never to the repo: (1) `@aevum-kit/aevum` is vendored as `file:./vendor/aevum`, because file-upload deployments only extract the `web/` subtree for the build, so the pnpm workspace at the repo root is not visible to the installer; (2) `@x402/core`, `@x402/evm`, `@x402/svm`, `@x402/extensions` (`^2.29.0`) are pinned, because Vercel's `npm install` resolves `@base-org/account` 2.4.0 (the local pnpm lockfile pins 2.2.0) whose `@coinbase/cdp-sdk` dynamically imports `@x402/*`, which are optional peers npm skips — without them the Turbopack build fails on `Can't resolve '@x402/core/client'`.
 
 ---
 
